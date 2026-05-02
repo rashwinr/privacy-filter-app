@@ -142,6 +142,7 @@ loadSupported();
 // ---------- Header tab switcher ----------
 const filterPanel = document.getElementById("filter-panel");
 const apiPanel = document.getElementById("api-panel");
+const dashboardPanel = document.getElementById("dashboard-panel");
 const apiBaseUrlEl = document.getElementById("api-base-url");
 const tabButtons = document.querySelectorAll(".header-nav .tablinks[data-tab]");
 
@@ -155,11 +156,16 @@ function activateTab(name) {
   tabButtons.forEach((b) => {
     b.classList.toggle("active", b.dataset.tab === name);
   });
+  filterPanel?.classList.add("hidden");
+  apiPanel?.classList.add("hidden");
+  dashboardPanel?.classList.add("hidden");
+
   if (name === "api") {
-    filterPanel?.classList.add("hidden");
     apiPanel?.classList.remove("hidden");
+  } else if (name === "dashboard") {
+    dashboardPanel?.classList.remove("hidden");
+    loadStats(); // Refresh immediately when switching to dashboard tab
   } else {
-    apiPanel?.classList.add("hidden");
     filterPanel?.classList.remove("hidden");
   }
   window.scrollTo({ top: 0, behavior: "smooth" });
@@ -168,3 +174,48 @@ function activateTab(name) {
 tabButtons.forEach((b) => {
   b.addEventListener("click", () => activateTab(b.dataset.tab));
 });
+
+// ---------- Dashboard stats ----------
+function animateCount(el, targetVal) {
+  if (!el) return;
+  const start = parseInt(el.textContent.replace(/[^0-9]/g, "")) || 0;
+  const end = parseInt(targetVal) || 0;
+  if (start === end) return;
+  const duration = 600;
+  const step = Math.ceil(Math.abs(end - start) / (duration / 16));
+  let current = start;
+  const timer = setInterval(() => {
+    current = start < end
+      ? Math.min(current + step, end)
+      : Math.max(current - step, end);
+    el.textContent = current.toLocaleString();
+    if (current === end) clearInterval(timer);
+  }, 16);
+}
+
+async function loadStats() {
+  try {
+    const r = await fetch("/api/stats");
+    if (!r.ok) return;
+    const s = await r.json();
+
+    // Dashboard cards
+    animateCount(document.getElementById("statPageVisits"), s.page_visits ?? 0);
+    animateCount(document.getElementById("statUniqueVisitors"), s.unique_visitors ?? 0);
+    animateCount(document.getElementById("statDocsRedacted"), s.docs_redacted ?? 0);
+
+    // Footer bar
+    const fv = document.getElementById("footerVisits");
+    const fu = document.getElementById("footerVisitors");
+    const fd = document.getElementById("footerDocs");
+    if (fv) fv.textContent = (s.page_visits ?? 0).toLocaleString();
+    if (fu) fu.textContent = (s.unique_visitors ?? 0).toLocaleString();
+    if (fd) fd.textContent = (s.docs_redacted ?? 0).toLocaleString();
+  } catch (e) {
+    // Stats fetch failure is non-critical; ignore silently.
+  }
+}
+
+// Load stats on page init and refresh every 30 seconds.
+loadStats();
+setInterval(loadStats, 30_000);

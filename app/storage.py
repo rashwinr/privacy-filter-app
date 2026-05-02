@@ -24,6 +24,7 @@ Failures are surfaced — callers should handle gracefully.
 from __future__ import annotations
 
 import io
+import json
 import logging
 import os
 import shutil
@@ -106,8 +107,8 @@ class GCSStorage(Storage):  # pragma: no cover - exercised in cloud
         Return an authenticated GCS client.
 
         Priority:
-          1. GCS_CREDENTIALS_JSON  → dedicated GCS service account (recommended)
-          2. GOOGLE_APPLICATION_CREDENTIALS → shared SA
+          1. GCS_CREDENTIALS_JSON  → raw JSON string (Secret Manager) or file path
+          2. GOOGLE_APPLICATION_CREDENTIALS → shared SA file path
           3. ADC (metadata server / gcloud login)
         """
         from google.cloud import storage as gcs
@@ -115,12 +116,26 @@ class GCSStorage(Storage):  # pragma: no cover - exercised in cloud
         gcs_creds = os.getenv("GCS_CREDENTIALS_JSON", "")
         gcp_creds = os.getenv("GOOGLE_APPLICATION_CREDENTIALS", "")
 
-        if gcs_creds and os.path.isfile(gcs_creds):
-            logger.info(f"GCS auth: dedicated GCS SA → {gcs_creds}")
-            return gcs.Client.from_service_account_json(gcs_creds)
+        if gcs_creds:
+            # Secret Manager injects the raw JSON *content*, not a file path.
+            # Detect whether it's a JSON blob or an existing file path.
+            if os.path.isfile(gcs_creds):
+                logger.info(f"GCS auth: dedicated GCS SA (file path) → {gcs_creds}")
+                return gcs.Client.from_service_account_json(gcs_creds)
+            # Treat as raw JSON string — write to a temp file for the SDK.
+            try:
+                creds_dict = json.loads(gcs_creds)
+                tmp_creds = Path(tempfile.gettempdir()) / "gcs_sa_creds.json"
+                tmp_creds.write_text(json.dumps(creds_dict))
+                logger.info("GCS auth: dedicated GCS SA (raw JSON from Secret Manager)")
+                return gcs.Client.from_service_account_json(str(tmp_creds))
+            except (json.JSONDecodeError, Exception) as exc:
+                logger.warning(f"GCS_CREDENTIALS_JSON is neither a file nor valid JSON: {exc}")
+
         if gcp_creds and os.path.isfile(gcp_creds):
             logger.info(f"GCS auth: GOOGLE_APPLICATION_CREDENTIALS → {gcp_creds}")
             return gcs.Client.from_service_account_json(gcp_creds)
+
         logger.info("GCS auth: Application Default Credentials (ADC)")
         return gcs.Client()
 
@@ -156,13 +171,15 @@ class GCSStorage(Storage):  # pragma: no cover - exercised in cloud
         return target
 
     def url(self, kind: str, key: str) -> str:
-        """Generate a v4 signed URL (15 min) so the browser can download directly."""
-        from datetime import timedelta
+        """Return a proxy URL through the app's /api/files/ endpoint.
 
-        blob = self.bucket.blob(self._blob_name(kind, key))
-        return blob.generate_signed_url(
-            expiration=timedelta(minutes=15), version="v4"
-        )
+        generate_signed_url() requires iam.serviceAccounts.signBlob which
+        Cloud Run's default SA does not have and ADC cannot provide without
+        a service account key. Routing downloads through the app avoids this
+        entirely — the /api/files/{kind}/{key} endpoint already streams from
+        GCS and is served over HTTPS.
+        """
+        return f"/api/files/{kind}/{key}"
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────

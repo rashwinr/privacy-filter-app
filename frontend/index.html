@@ -33,6 +33,7 @@
       <div class="header-nav-bar">
         <nav class="header-nav">
           <button type="button" class="tablinks active" data-tab="filter"><i class="fas fa-user-shield"></i> Privacy Filter</button>
+          <button type="button" class="tablinks" data-tab="dashboard"><i class="fas fa-chart-bar"></i> Dashboard</button>
           <button type="button" class="tablinks" data-tab="api"><i class="fas fa-code"></i> API Access</button>
         </nav>
       </div>
@@ -225,7 +226,43 @@ print("Download:", result["redacted_url"])</code></pre>
         </div>
       </section>
       </div>
+
+      <!-- ── Dashboard Panel ── -->
+      <section id="dashboard-panel" class="hidden" aria-labelledby="dashboard-title">
+        <div class="dash-header">
+          <h1 id="dashboard-title"><i class="fas fa-chart-bar" style="color:var(--primary)"></i> Dashboard</h1>
+          <p class="sub">Live usage statistics for the Privacy Filter service.</p>
+        </div>
+
+        <!-- Stat Cards -->
+        <div class="dash-stats">
+          <div class="dash-card" style="--card-accent: var(--primary)">
+            <div class="dash-card-icon" style="color:var(--primary)"><i class="fas fa-eye"></i></div>
+            <div class="dash-card-body">
+              <span class="dash-card-value" id="statPageVisits">—</span>
+              <span class="dash-card-label">Page Visits</span>
+            </div>
+          </div>
+          <div class="dash-card" style="--card-accent:#6366f1">
+            <div class="dash-card-icon" style="color:#6366f1"><i class="fas fa-users"></i></div>
+            <div class="dash-card-body">
+              <span class="dash-card-value" id="statUniqueVisitors">—</span>
+              <span class="dash-card-label">Unique Visitors</span>
+            </div>
+          </div>
+          <div class="dash-card" style="--card-accent:#f59e0b">
+            <div class="dash-card-icon" style="color:#f59e0b"><i class="fas fa-file-shield"></i></div>
+            <div class="dash-card-body">
+              <span class="dash-card-value" id="statDocsRedacted">—</span>
+              <span class="dash-card-label">Documents Redacted</span>
+            </div>
+          </div>
+        </div>
+
+        <p class="dash-note"><i class="fas fa-info-circle"></i> Stats refresh every 30 seconds. Visitor count is anonymised — IPs are stored as one-way hashes only.</p>
+      </section>
     </main>
+
 
     <footer class="footer">
       <div class="footer-links">
@@ -242,6 +279,26 @@ print("Download:", result["redacted_url"])</code></pre>
           <i class="fab fa-youtube"></i>
         </a>
       </div>
+      <!-- Live stats bar -->
+      <div class="footer-stats">
+        <div class="footer-stat">
+          <i class="fas fa-eye"></i>
+          <span class="footer-stat-val" id="footerVisits">—</span>
+          <span class="footer-stat-label">Page Visits</span>
+        </div>
+        <div class="footer-stat-divider"></div>
+        <div class="footer-stat">
+          <i class="fas fa-users"></i>
+          <span class="footer-stat-val" id="footerVisitors">—</span>
+          <span class="footer-stat-label">Unique Visitors</span>
+        </div>
+        <div class="footer-stat-divider"></div>
+        <div class="footer-stat">
+          <i class="fas fa-file-shield"></i>
+          <span class="footer-stat-val" id="footerDocs">—</span>
+          <span class="footer-stat-label">Documents Redacted</span>
+        </div>
+      </div>
       <p class="footer-disclaimer">
         <strong>Test version — not for production use.</strong>
         Output is provided as-is; users are responsible for confirming
@@ -249,6 +306,7 @@ print("Download:", result["redacted_url"])</code></pre>
       </p>
       <p class="copyright">&copy; 2026 Tanuh AI. All rights reserved.</p>
     </footer>
+
 
     <script src="/static/app.js"></script>
   </body>

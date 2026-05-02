@@ -5,6 +5,7 @@ Endpoints
 GET  /                          → frontend (single-page HTML)
 GET  /api/health                → liveness + model status
 GET  /api/supported-types       → list of accepted file extensions
+GET  /api/stats                 → live usage counters (visits, docs redacted)
 POST /api/redact                → multipart upload; returns RedactionResult
 GET  /api/files/{kind}/{key}    → download originals or redacted outputs
                                   (kind ∈ {uploads, redacted})
@@ -14,6 +15,7 @@ from __future__ import annotations
 import gc
 import logging
 import os
+import tempfile
 import uuid
 from collections import Counter
 from contextlib import asynccontextmanager
@@ -21,14 +23,15 @@ from pathlib import Path
 from typing import List
 
 from dotenv import load_dotenv
-from fastapi import FastAPI, File, HTTPException, UploadFile
-from fastapi.responses import FileResponse, RedirectResponse
+from fastapi import FastAPI, File, HTTPException, Request, UploadFile
+from fastapi.responses import FileResponse, RedirectResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
 from app.model import PrivacyFilter
 from app.redactor import get_handler, supported_extensions
 from app.schemas import Entity, HealthResponse, RedactionResult
-from app.storage import get_storage
+from app.stats import get_stats, record_redaction, record_visit
+from app.storage import get_storage, _guess_content_type
 
 load_dotenv()
 
@@ -66,7 +69,14 @@ if FRONTEND_DIR.exists():
 
 
 @app.get("/", include_in_schema=False)
-async def root():
+async def root(request: Request):
+    # Record each page load; track unique visitors by client IP.
+    client_ip = request.headers.get("x-forwarded-for", "").split(",")[0].strip() \
+                or (request.client.host if request.client else None)
+    try:
+        record_visit(client_ip)
+    except Exception:
+        pass  # Never let stats tracking break the page load.
     index = FRONTEND_DIR / "index.html"
     if index.exists():
         return FileResponse(index)
@@ -113,8 +123,16 @@ async def redact_file(file: UploadFile = File(...)):
     entities_raw: list = []
     try:
         raw_bytes = await file.read()
+
+        # Write to a local temp path first so the extractor can read it
+        # without a round-trip GCS download after save().
+        tmp_upload_dir = Path(tempfile.gettempdir()) / "pf_uploads"
+        tmp_upload_dir.mkdir(parents=True, exist_ok=True)
+        upload_path = tmp_upload_dir / upload_key
+        upload_path.write_bytes(raw_bytes)
+
+        # Push to configured storage (GCS or local ./data).
         storage.save("uploads", upload_key, raw_bytes)
-        upload_path = storage.local_path("uploads", upload_key)
         # Drop the in-memory copy as soon as it's on disk.
         raw_bytes = None
 
@@ -136,20 +154,26 @@ async def redact_file(file: UploadFile = File(...)):
         entities = [Entity(**e) for e in entities_raw]
         counts = Counter(e.entity_group for e in entities)
 
+
         # 3. Produce redacted output (same format)
         redacted_key = f"{job_id}__redacted{handler.out_extension}"
-        redacted_local = storage.local_path("redacted", redacted_key)
-        redacted_local.parent.mkdir(parents=True, exist_ok=True)
+
+        # Always write to a local temp path first — GCSStorage.local_path()
+        # would attempt a GCS download for a file that doesn't exist yet.
+        tmp_redact_dir = Path(tempfile.gettempdir()) / "pf_redacted"
+        tmp_redact_dir.mkdir(parents=True, exist_ok=True)
+        redacted_local = tmp_redact_dir / redacted_key
+
         try:
             handler.redact(upload_path, entities_raw, redacted_local)
         except Exception as e:
             logger.exception("Redaction failed")
             raise HTTPException(status_code=500, detail=f"Redaction failed: {e}")
 
-        # If using GCS, push the redacted bytes up.
-        if os.getenv("STORAGE_BACKEND", "local").lower() == "gcs":
-            with open(redacted_local, "rb") as f:
-                storage.save("redacted", redacted_key, f.read())
+        # Upload to GCS (or local storage keeps the file in place).
+        with open(redacted_local, "rb") as fh:
+            storage.save("redacted", redacted_key, fh.read())
+
 
         # 4. Build text previews (truncate)
         preview_orig = text[:2000] if text else None
@@ -163,7 +187,7 @@ async def redact_file(file: UploadFile = File(...)):
             except Exception:
                 redacted_text_for_preview = None
 
-        return RedactionResult(
+        result = RedactionResult(
             job_id=job_id,
             filename=safe_name,
             content_type=file.content_type or "application/octet-stream",
@@ -175,6 +199,12 @@ async def redact_file(file: UploadFile = File(...)):
             text_preview_redacted=redacted_text_for_preview,
             notes=None,
         )
+        # Count successful redactions for the dashboard.
+        try:
+            record_redaction()
+        except Exception:
+            pass
+        return result
     finally:
         # Drop large transient buffers so the next request starts clean.
         raw_bytes = None
@@ -189,8 +219,31 @@ async def download_file(kind: str, key: str):
         raise HTTPException(status_code=404, detail="Unknown kind")
     storage = get_storage()
     if os.getenv("STORAGE_BACKEND", "local").lower() == "gcs":
-        return RedirectResponse(storage.url(kind, key))
+        # Stream bytes directly from GCS — no signed URL required.
+        try:
+            data = storage.open_read(kind, key)
+        except Exception as e:
+            logger.exception("GCS download failed")
+            raise HTTPException(status_code=404, detail=f"File not found in GCS: {e}")
+        filename = key.split("__", 1)[-1]
+        content_type = _guess_content_type(filename)
+        return StreamingResponse(
+            data,
+            media_type=content_type,
+            headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+        )
     p = storage.local_path(kind, key)
     if not p.exists():
         raise HTTPException(status_code=404, detail="File not found")
     return FileResponse(p, filename=key.split("__", 1)[-1])
+
+
+@app.get("/api/stats")
+async def stats():
+    """Return live usage counters for the dashboard."""
+    try:
+        return get_stats()
+    except Exception as e:
+        logger.exception("Stats fetch failed")
+        return {"page_visits": 0, "unique_visitors": 0, "docs_redacted": 0}
+
