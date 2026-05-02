@@ -50,13 +50,14 @@ steps:
           --region ${_REGION} \
           --platform managed \
           --allow-unauthenticated \
-          --memory 4Gi \
-          --cpu 2 \
+          --memory 8Gi \
+          --cpu 4 \
           --concurrency 4 \
-          --timeout 300 \
+          --timeout 600 \
           --min-instances 0 \
           --max-instances 5 \
-          --set-env-vars "MODEL_NAME=openai/privacy-filter,MODEL_DEVICE=cpu,STORAGE_BACKEND=gcs,GCS_BUCKET=${_BUCKET},GCS_PREFIX=${_GCS_PREFIX},DICOM_PIXEL_REDACT_ROWS=${_DICOM_ROWS},LOG_LEVEL=INFO" \
+          --startup-cpu-boost \
+          --set-env-vars "MODEL_NAME=openai/privacy-filter,MODEL_DEVICE=cpu,STORAGE_BACKEND=gcs,GCS_BUCKET=${_BUCKET},GCS_PREFIX=${_GCS_PREFIX},DICOM_PIXEL_REDACT_ROWS=${_DICOM_ROWS},LOG_LEVEL=INFO,PORT=8080" \
           --set-secrets "GCS_CREDENTIALS_JSON=${_GCS_SECRET}:latest"
 
 # ── HOW TO USE ─────────────────────────────────────────────────────────────────
