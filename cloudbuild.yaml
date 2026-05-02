@@ -1,9 +1,10 @@
 # Cloud Build: build + push + deploy privacy-filter to Cloud Run
-# Uses GCS backend (tanuh-bcd-bucket/privacy-app) with Secret Manager for credentials.
+# Uses Artifact Registry + GCS backend (tanuh-bcd-bucket/privacy-app) + Secret Manager.
 
 substitutions:
   _REGION: "asia-south1"
   _SERVICE: "privacy-filter"
+  _AR_REPO: "cloud-run-source-deploy"
   _BUCKET: "tanuh-bcd-bucket"
   _GCS_PREFIX: "privacy-app"
   _GCS_SECRET: "privacy-filter-gcs-sa"
@@ -15,7 +16,7 @@ options:
   logging: CLOUD_LOGGING_ONLY
 
 images:
-  - "gcr.io/$PROJECT_ID/${_SERVICE}:${_TAG}"
+  - "${_REGION}-docker.pkg.dev/$PROJECT_ID/${_AR_REPO}/${_SERVICE}:${_TAG}"
 
 steps:
   # ── Step 1: Build Docker image ──────────────────────────────────────────────
@@ -24,18 +25,18 @@ steps:
     args:
       - "build"
       - "-t"
-      - "gcr.io/$PROJECT_ID/${_SERVICE}:${_TAG}"
+      - "${_REGION}-docker.pkg.dev/$PROJECT_ID/${_AR_REPO}/${_SERVICE}:${_TAG}"
       - "-t"
-      - "gcr.io/$PROJECT_ID/${_SERVICE}:latest"
+      - "${_REGION}-docker.pkg.dev/$PROJECT_ID/${_AR_REPO}/${_SERVICE}:latest"
       - "."
 
-  # ── Step 2: Push image to Container Registry ────────────────────────────────
+  # ── Step 2: Push image to Artifact Registry ─────────────────────────────────
   - id: "push"
     name: "gcr.io/cloud-builders/docker"
     args:
       - "push"
       - "--all-tags"
-      - "gcr.io/$PROJECT_ID/${_SERVICE}"
+      - "${_REGION}-docker.pkg.dev/$PROJECT_ID/${_AR_REPO}/${_SERVICE}"
 
   # ── Step 3: Deploy to Cloud Run ─────────────────────────────────────────────
   - id: "deploy"
@@ -45,7 +46,7 @@ steps:
       - "-c"
       - |
         gcloud run deploy ${_SERVICE} \
-          --image gcr.io/$PROJECT_ID/${_SERVICE}:${_TAG} \
+          --image ${_REGION}-docker.pkg.dev/$PROJECT_ID/${_AR_REPO}/${_SERVICE}:${_TAG} \
           --region ${_REGION} \
           --platform managed \
           --allow-unauthenticated \
@@ -60,27 +61,13 @@ steps:
 
 # ── HOW TO USE ─────────────────────────────────────────────────────────────────
 #
-# One-time setup (already done if secret exists):
-#
-#   gcloud secrets create privacy-filter-gcs-sa \
-#     --data-file=gcs-service-account.json \
-#     --project=tanuh-bcd-questionnaire
-#
-#   To update an existing secret version:
-#   gcloud secrets versions add privacy-filter-gcs-sa \
-#     --data-file=gcs-service-account.json \
-#     --project=tanuh-bcd-questionnaire
-#
-#   Grant Cloud Build SA (project 147901050545) access:
-#   gcloud secrets add-iam-policy-binding privacy-filter-gcs-sa \
-#     --member="serviceAccount:147901050545@cloudbuild.gserviceaccount.com" \
-#     --role="roles/secretmanager.secretAccessor" \
-#     --project=tanuh-bcd-questionnaire
-#
 # Submit the build:
 #
 #   gcloud builds submit --config cloudbuild.yaml \
 #     --project=tanuh-bcd-questionnaire
+#
+# Image will be pushed to:
+#   asia-south1-docker.pkg.dev/tanuh-bcd-questionnaire/cloud-run-source-deploy/privacy-filter:latest
 #
 # Files will be written to:
 #   gs://tanuh-bcd-bucket/privacy-app/uploads/
