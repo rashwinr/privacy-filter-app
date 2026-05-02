@@ -2,6 +2,14 @@
 .env
 *.env.local
 
+# GCP / GCS credentials (never commit service account keys)
+*service-account*.json
+gcp-*.json
+gcs-*.json
+
+# SSL / TLS certificates (Cloud SQL client certs)
+*.pem
+
 # Data (uploads + redacted outputs)
 data/uploads/*
 data/redacted/*
