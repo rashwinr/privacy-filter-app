@@ -1,12 +1,13 @@
-// cloud build configuration with full GCS + Secret Manager wiring
+# Cloud Build: build + push + deploy privacy-filter to Cloud Run
+# Uses GCS backend (tanuh-bcd-bucket/privacy-app) with Secret Manager for credentials.
 
 substitutions:
-  _REGION: asia-south1
-  _SERVICE: privacy-filter
-  _BUCKET: tanuh-bcd-bucket
-  _GCS_PREFIX: privacy-app
-  _GCS_SECRET: privacy-filter-gcs-sa   # Secret Manager secret name for gcs-service-account.json
-  _DICOM_ROWS: "100"                   # rows to black out for DICOM pixel burn-in redaction
+  _REGION: "asia-south1"
+  _SERVICE: "privacy-filter"
+  _BUCKET: "tanuh-bcd-bucket"
+  _GCS_PREFIX: "privacy-app"
+  _GCS_SECRET: "privacy-filter-gcs-sa"
+  _DICOM_ROWS: "100"
 
 options:
   machineType: E2_HIGHCPU_8
@@ -17,27 +18,30 @@ images:
 
 steps:
   # ── Step 1: Build Docker image ──────────────────────────────────────────────
-  - id: build
-    name: gcr.io/cloud-builders/docker
+  - id: "build"
+    name: "gcr.io/cloud-builders/docker"
     args:
-      - build
-      - -t
-      - gcr.io/$PROJECT_ID/${_SERVICE}:$SHORT_SHA
-      - -t
-      - gcr.io/$PROJECT_ID/${_SERVICE}:latest
-      - .
+      - "build"
+      - "-t"
+      - "gcr.io/$PROJECT_ID/${_SERVICE}:$SHORT_SHA"
+      - "-t"
+      - "gcr.io/$PROJECT_ID/${_SERVICE}:latest"
+      - "."
 
   # ── Step 2: Push image to Container Registry ────────────────────────────────
-  - id: push
-    name: gcr.io/cloud-builders/docker
-    args: [push, --all-tags, gcr.io/$PROJECT_ID/${_SERVICE}]
+  - id: "push"
+    name: "gcr.io/cloud-builders/docker"
+    args:
+      - "push"
+      - "--all-tags"
+      - "gcr.io/$PROJECT_ID/${_SERVICE}"
 
   # ── Step 3: Deploy to Cloud Run ─────────────────────────────────────────────
-  - id: deploy
-    name: gcr.io/google.com/cloudsdktool/cloud-sdk
-    entrypoint: bash
+  - id: "deploy"
+    name: "gcr.io/google.com/cloudsdktool/cloud-sdk"
+    entrypoint: "bash"
     args:
-      - -c
+      - "-c"
       - |
         gcloud run deploy ${_SERVICE} \
           --image gcr.io/$PROJECT_ID/${_SERVICE}:$SHORT_SHA \
@@ -50,35 +54,33 @@ steps:
           --timeout 300 \
           --min-instances 0 \
           --max-instances 5 \
-          --set-env-vars "MODEL_NAME=openai/privacy-filter,\
-MODEL_DEVICE=cpu,\
-STORAGE_BACKEND=gcs,\
-GCS_BUCKET=${_BUCKET},\
-GCS_PREFIX=${_GCS_PREFIX},\
-DICOM_PIXEL_REDACT_ROWS=${_DICOM_ROWS},\
-LOG_LEVEL=INFO" \
+          --set-env-vars "MODEL_NAME=openai/privacy-filter,MODEL_DEVICE=cpu,STORAGE_BACKEND=gcs,GCS_BUCKET=${_BUCKET},GCS_PREFIX=${_GCS_PREFIX},DICOM_PIXEL_REDACT_ROWS=${_DICOM_ROWS},LOG_LEVEL=INFO" \
           --set-secrets "GCS_CREDENTIALS_JSON=${_GCS_SECRET}:latest"
 
 # ── HOW TO USE ─────────────────────────────────────────────────────────────────
 #
-# 1. Create the GCS service account secret in Secret Manager (one-time):
+# One-time setup (already done if secret exists):
 #
-#    gcloud secrets create privacy-filter-gcs-sa \
-#      --data-file=gcs-service-account.json \
-#      --project=tanuh-bcd-questionnaire
+#   gcloud secrets create privacy-filter-gcs-sa \
+#     --data-file=gcs-service-account.json \
+#     --project=tanuh-bcd-questionnaire
 #
-# 2. Grant Cloud Build SA access to the secret:
+#   To update an existing secret version:
+#   gcloud secrets versions add privacy-filter-gcs-sa \
+#     --data-file=gcs-service-account.json \
+#     --project=tanuh-bcd-questionnaire
 #
-#    gcloud secrets add-iam-policy-binding privacy-filter-gcs-sa \
-#      --member="serviceAccount:<PROJECT_NUMBER>@cloudbuild.gserviceaccount.com" \
-#      --role="roles/secretmanager.secretAccessor"
+#   Grant Cloud Build SA (project 147901050545) access:
+#   gcloud secrets add-iam-policy-binding privacy-filter-gcs-sa \
+#     --member="serviceAccount:147901050545@cloudbuild.gserviceaccount.com" \
+#     --role="roles/secretmanager.secretAccessor" \
+#     --project=tanuh-bcd-questionnaire
 #
-# 3. Submit the build:
+# Submit the build:
 #
-#    gcloud builds submit --config cloudbuild.yaml \
-#      --project=tanuh-bcd-questionnaire \
-#      --substitutions=_REGION=asia-south1,_SERVICE=privacy-filter
+#   gcloud builds submit --config cloudbuild.yaml \
+#     --project=tanuh-bcd-questionnaire
 #
-# The deployed service will write to:
-#   gs://tanuh-bcd-bucket/privacy-app/uploads/   ← original uploads
-#   gs://tanuh-bcd-bucket/privacy-app/redacted/  ← de-identified outputs
+# Files will be written to:
+#   gs://tanuh-bcd-bucket/privacy-app/uploads/
+#   gs://tanuh-bcd-bucket/privacy-app/redacted/
