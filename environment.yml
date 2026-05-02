@@ -1,0 +1,11 @@
+name: privacy-filter
+channels:
+  - conda-forge
+  - defaults
+dependencies:
+  - python=3.11
+  - pip
+  - tesseract           # System OCR binary (also installable via brew on macOS)
+  - poppler             # For pdf2image (image PDF fallback)
+  - pip:
+      - -r requirements.txt

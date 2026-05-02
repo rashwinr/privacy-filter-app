@@ -1,0 +1,52 @@
+# Optional: build + push + deploy to Cloud Run from source.
+# Trigger:  gcloud builds submit --config cloudbuild.yaml \
+#             --substitutions=_REGION=asia-south1,_SERVICE=privacy-filter,_BUCKET=
+substitutions:
+  _REGION: asia-south1
+  _SERVICE: privacy-filter
+  _BUCKET: ""           # leave empty for local-FS mode
+
+options:
+  machineType: E2_HIGHCPU_8
+  logging: CLOUD_LOGGING_ONLY
+
+images:
+  - "gcr.io/$PROJECT_ID/${_SERVICE}:$SHORT_SHA"
+
+steps:
+  - id: build
+    name: gcr.io/cloud-builders/docker
+    args:
+      - build
+      - -t
+      - gcr.io/$PROJECT_ID/${_SERVICE}:$SHORT_SHA
+      - -t
+      - gcr.io/$PROJECT_ID/${_SERVICE}:latest
+      - .
+
+  - id: push
+    name: gcr.io/cloud-builders/docker
+    args: [push, --all-tags, gcr.io/$PROJECT_ID/${_SERVICE}]
+
+  - id: deploy
+    name: gcr.io/google.com/cloudsdktool/cloud-sdk
+    entrypoint: bash
+    args:
+      - -c
+      - |
+        ENV_VARS="MODEL_NAME=openai/privacy-filter,MODEL_DEVICE=cpu"
+        if [ -n "${_BUCKET}" ]; then
+          ENV_VARS="$$ENV_VARS,STORAGE_BACKEND=gcs,GCS_BUCKET=${_BUCKET}"
+        fi
+        gcloud run deploy ${_SERVICE} \
+          --image gcr.io/$PROJECT_ID/${_SERVICE}:$SHORT_SHA \
+          --region ${_REGION} \
+          --platform managed \
+          --allow-unauthenticated \
+          --memory 4Gi \
+          --cpu 2 \
+          --concurrency 4 \
+          --timeout 300 \
+          --min-instances 0 \
+          --max-instances 5 \
+          --set-env-vars "$$ENV_VARS"

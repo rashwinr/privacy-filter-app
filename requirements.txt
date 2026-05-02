@@ -1,0 +1,36 @@
+# --- Web framework ---
+fastapi==0.115.4
+uvicorn[standard]==0.32.0
+python-multipart==0.0.12
+jinja2==3.1.4
+pydantic==2.9.2
+
+# --- Privacy filter model ---
+# CPU-only torch keeps the Cloud Run image small. For GPU, swap to torch+cu121.
+# NOTE: openai/privacy-filter requires transformers>=5.6 for the
+# `openai_privacy_filter` architecture (MoE + sliding-window attention).
+--extra-index-url https://download.pytorch.org/whl/cpu
+torch==2.5.1
+transformers==5.6.2
+accelerate==1.10.0
+safetensors==0.5.2
+huggingface-hub==1.12.0
+tokenizers==0.22.2
+
+# --- File extractors ---
+pypdf==5.1.0
+pdfplumber==0.11.4              # Better text+coordinates for redaction overlays
+pdf2image==1.17.0               # Image-PDF fallback (OCR)
+python-docx==1.1.2
+Pillow==11.0.0
+pytesseract==0.3.13
+pydicom==3.0.1
+
+# --- Redaction output (PDF rewriting with redaction boxes) ---
+pymupdf==1.24.13                # fitz: high-quality redaction with true blacking out
+
+# --- Storage abstraction (GCS optional, used when STORAGE_BACKEND=gcs) ---
+google-cloud-storage==2.18.2
+
+# --- Misc ---
+python-dotenv==1.0.1

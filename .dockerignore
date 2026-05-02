@@ -1,0 +1,14 @@
+.git
+.idea
+.vscode
+.venv
+venv
+__pycache__
+*.pyc
+data/uploads/*
+data/redacted/*
+!data/uploads/.gitkeep
+!data/redacted/.gitkeep
+.env
+*.md
+hf_cache

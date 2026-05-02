@@ -1,0 +1,225 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Privacy Filter · Tanuh</title>
+    <link rel="icon" type="image/png" href="/static/assets/tanuh.png" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="/static/styles.css" />
+  </head>
+  <body>
+    <header class="navbar">
+      <div class="navbar-content">
+        <a class="logo-link" href="/">
+          <img src="/static/assets/tanuh.png" alt="Tanuh" class="logo-img" />
+        </a>
+        <nav class="navbar-tabs">
+          <button type="button" class="nav-link active" data-tab="filter">Privacy Filter</button>
+          <button type="button" class="nav-link" data-tab="api">API Access</button>
+        </nav>
+      </div>
+    </header>
+
+    <main class="app-container">
+      <section id="api-panel" class="card api-panel hidden" aria-labelledby="api-panel-title">
+        <div class="card-header">
+          <h1 id="api-panel-title">API Access <span class="beta-tag">NOTES</span></h1>
+          <p class="sub">
+            How to call this Privacy Filter service from your own code or pipeline.
+          </p>
+        </div>
+        <div class="card-body api-body">
+          <div class="api-callout" role="note">
+            <strong>Test version only.</strong> This endpoint is intended for
+            evaluation. Do not send production PHI/PII without contacting Tanuh
+            for a hardened deployment, signed access, and a data-handling
+            agreement.
+          </div>
+
+          <h3>Base URL</h3>
+          <pre class="code-block"><code id="api-base-url">https://privacy-filter.tanuh.org</code></pre>
+
+          <h3>Authentication</h3>
+          <p>
+            The test deployment is currently open (no API key). For production
+            access, request a signed identity token from Tanuh and pass it as
+            <code>Authorization: Bearer &lt;token&gt;</code>.
+          </p>
+
+          <h3>Endpoints</h3>
+          <ul class="endpoint-list">
+            <li>
+              <code class="http-verb get">GET</code>
+              <code>/api/health</code>
+              — liveness + model status.
+            </li>
+            <li>
+              <code class="http-verb get">GET</code>
+              <code>/api/supported-types</code>
+              — list of accepted file extensions.
+            </li>
+            <li>
+              <code class="http-verb post">POST</code>
+              <code>/api/redact</code>
+              — multipart upload, returns detected entities + redacted file URL.
+            </li>
+            <li>
+              <code class="http-verb get">GET</code>
+              <code>/api/files/{kind}/{key}</code>
+              — download originals or redacted outputs (<code>kind</code> ∈
+              <code>uploads</code>, <code>redacted</code>).
+            </li>
+          </ul>
+
+          <h3>Quick start (curl)</h3>
+<pre class="code-block"><code>curl -X POST https://privacy-filter.tanuh.org/api/redact \
+  -F "file=@/path/to/document.pdf"</code></pre>
+
+          <h3>Quick start (Python)</h3>
+<pre class="code-block"><code>import requests
+
+with open("document.pdf", "rb") as f:
+    r = requests.post(
+        "https://privacy-filter.tanuh.org/api/redact",
+        files={"file": ("document.pdf", f, "application/pdf")},
+        timeout=600,
+    )
+    r.raise_for_status()
+    result = r.json()
+
+print(result["entity_counts"])
+print("Download:", result["redacted_url"])</code></pre>
+
+          <h3>Response shape</h3>
+<pre class="code-block"><code>{
+  "job_id": "a1b2c3d4e5f6",
+  "filename": "document.pdf",
+  "entity_counts": {"private_person": 2, "private_email": 1, ...},
+  "entities": [{"entity_group": "private_person", "word": "...", "start": 42, "end": 53, "score": 0.99}],
+  "original_url": "/api/files/uploads/...",
+  "redacted_url": "/api/files/redacted/...",
+  "text_preview_original": "...",
+  "text_preview_redacted": "..."
+}</code></pre>
+
+          <h3>Supported file types</h3>
+          <p>
+            <code>.txt</code>, <code>.md</code>, <code>.log</code>,
+            <code>.csv</code>, <code>.pdf</code>, <code>.docx</code>,
+            <code>.png</code>, <code>.jpg</code>/<code>.jpeg</code>,
+            <code>.tif</code>/<code>.tiff</code>,
+            <code>.dcm</code>/<code>.dicom</code>.
+          </p>
+
+          <h3>Limits and behaviour</h3>
+          <ul class="endpoint-list plain">
+            <li>Max request timeout: <strong>600 seconds</strong>.</li>
+            <li>Concurrency per instance: <strong>1</strong> (large documents may queue).</li>
+            <li>Scanned PDFs are OCR'd at 200 DPI before detection.</li>
+            <li>Three detection layers run on every request: <code>openai/privacy-filter</code> (personal PII), <code>dslim/bert-base-NER</code> (organisations / locations / people), and deterministic regex rules (tax IDs, IFSC, IBAN, SSN, EIN, Aadhaar, emails, URLs, honorific-prefixed names, labeled fields).</li>
+            <li>Detections are best-effort. Always review redacted output before sharing.</li>
+          </ul>
+
+          <h3>Tuning via headers / env</h3>
+          <p>
+            For self-hosted deployments, behaviour can be tuned via env vars:
+            <code>EXTRA_REDACTION_KEYWORDS</code>,
+            <code>DISABLED_RULE_DETECTORS</code>,
+            <code>ENABLE_NER_MODEL</code>,
+            <code>NER_MODEL</code>,
+            <code>PRIVACY_FILTER_OCR_DPI</code>.
+          </p>
+
+          <h3>Contact</h3>
+          <p>
+            For production access, support, or to report a redaction miss,
+            contact the Tanuh team. Please include the document type and a
+            screenshot of the missed span when filing a regression.
+          </p>
+        </div>
+      </section>
+
+      <div id="filter-panel">
+      <div class="disclaimer" role="alert">
+        <strong>Test version only.</strong>
+        This is an experimental tool. Detections may be incomplete or incorrect —
+        please review every output and perform your own due diligence before
+        relying on or sharing redacted documents.
+      </div>
+
+      <section class="card">
+        <div class="card-header">
+          <h1>Privacy Filter <span class="beta-tag">BETA</span></h1>
+          <p class="sub">
+            Upload a document and detect personal information using
+            <code>openai/privacy-filter</code>.
+          </p>
+          <div id="health" class="health">checking model…</div>
+        </div>
+
+        <div class="card-body">
+          <section id="dropzone" class="dropzone">
+            <input type="file" id="file-input" hidden />
+            <div class="dz-inner">
+              <div class="dz-icon" aria-hidden="true">
+                <svg width="48" height="48" viewBox="0 0 24 24" fill="none"
+                     stroke="currentColor" stroke-width="2"
+                     stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                  <polyline points="17 8 12 3 7 8" />
+                  <line x1="12" y1="3" x2="12" y2="15" />
+                </svg>
+              </div>
+              <strong>Drop a file here</strong>
+              <span>or click to browse</span>
+              <small id="supported"></small>
+            </div>
+          </section>
+
+          <section id="status" class="status hidden"></section>
+
+          <section id="results" class="results hidden">
+            <div class="downloads">
+              <a id="dl-original" class="btn btn-ghost" download>Download original</a>
+              <a id="dl-redacted" class="btn btn-primary" download>Download redacted</a>
+            </div>
+
+            <div class="counts">
+              <h3>Detected entities</h3>
+              <ul id="counts-list"></ul>
+            </div>
+
+            <div class="previews">
+              <div>
+                <h3>Original (preview)</h3>
+                <pre id="prev-original"></pre>
+              </div>
+              <div>
+                <h3>Redacted (preview)</h3>
+                <pre id="prev-redacted"></pre>
+              </div>
+            </div>
+          </section>
+        </div>
+      </section>
+      </div>
+    </main>
+
+    <footer>
+      <small>
+        <strong>Test version — not for production use.</strong>
+        Output is provided as-is; users are responsible for confirming
+        redactions before sharing. Files are stored on the server filesystem
+        under <code>./data</code>. © Tanuh.
+      </small>
+    </footer>
+
+    <script src="/static/app.js"></script>
+  </body>
+</html>
