@@ -9,15 +9,18 @@ const healthEl = $("#health");
 const supportedEl = $("#supported");
 
 async function pingHealth() {
+  const badge = healthEl;
+  const textEl = document.getElementById("health-text");
   try {
     const r = await fetch("/api/health");
     const j = await r.json();
-    healthEl.textContent = `model: ${j.model} · device: ${j.device} · ${j.model_loaded ? "ready" : "loading…"}`;
-    healthEl.classList.toggle("ok", !!j.model_loaded);
-    if (!j.model_loaded) setTimeout(pingHealth, 2000);
+    const ready = !!j.model_loaded;
+    textEl.textContent = `${j.model} · ${j.device} · ${ready ? "READY" : "LOADING…"}`;
+    badge.classList.toggle("ai-badge-off", !ready);
+    if (!ready) setTimeout(pingHealth, 2000);
   } catch (e) {
-    healthEl.textContent = "model service unreachable";
-    healthEl.classList.add("err");
+    textEl.textContent = "MODEL SERVICE UNREACHABLE";
+    badge.classList.add("ai-badge-off");
   }
 }
 
@@ -140,7 +143,7 @@ loadSupported();
 const filterPanel = document.getElementById("filter-panel");
 const apiPanel = document.getElementById("api-panel");
 const apiBaseUrlEl = document.getElementById("api-base-url");
-const tabButtons = document.querySelectorAll(".navbar-tabs .nav-link[data-tab]");
+const tabButtons = document.querySelectorAll(".header-nav .tablinks[data-tab]");
 
 // Reflect the current origin in the API panel so the user sees the URL
 // they'd actually hit (handy on localhost / staging).

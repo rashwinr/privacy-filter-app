@@ -3,26 +3,42 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Privacy Filter · Tanuh</title>
+    <title>Privacy Filter | Tanuh AI</title>
+    <meta name="description" content="Upload documents and detect personal information using openai/privacy-filter. De-identify DICOM, PDF, DOCX, images and text files." />
     <link rel="icon" type="image/png" href="/static/assets/tanuh.png" />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <link
-      href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700&display=swap"
-      rel="stylesheet"
-    />
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Poppins:wght@600;700&display=swap" rel="stylesheet" crossorigin="anonymous" />
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" />
     <link rel="stylesheet" href="/static/styles.css" />
   </head>
   <body>
-    <header class="navbar">
-      <div class="navbar-content">
-        <a class="logo-link" href="/">
-          <img src="/static/assets/tanuh.png" alt="Tanuh" class="logo-img" />
-        </a>
-        <nav class="navbar-tabs">
-          <button type="button" class="nav-link active" data-tab="filter">Privacy Filter</button>
-          <button type="button" class="nav-link" data-tab="api">API Access</button>
+    <header class="main-header">
+      <!-- Row 1: Brand (left) + Logos (right) -->
+      <div class="header-row-brand">
+        <div class="header-brand">
+          <div class="title-group">
+            <i class="fas fa-shield-alt fhir-icon" style="color: var(--primary);"></i>
+            <h1>Privacy Filter</h1>
+          </div>
+          <p class="subtitle">De-identify documents using AI-powered PII detection</p>
+        </div>
+        <div class="header-logos">
+          <img src="/static/assets/tanuh.png" alt="Tanuh Logo" class="logo" />
+          <img src="/static/assets/MoE_Logo.svg" alt="Ministry of Education Logo" class="logo" />
+          <img src="/static/assets/IISc_Logo.png" alt="IISc Logo" class="logo" />
+        </div>
+      </div>
+      <!-- Row 2: Nav tabs centered -->
+      <div class="header-nav-bar">
+        <nav class="header-nav">
+          <button type="button" class="tablinks active" data-tab="filter"><i class="fas fa-user-shield"></i> Privacy Filter</button>
+          <button type="button" class="tablinks" data-tab="api"><i class="fas fa-code"></i> API Access</button>
         </nav>
+      </div>
+      <!-- Row 3: AI status indicator -->
+      <div class="header-ai-bar">
+        <div id="health" class="ai-badge ai-badge-off"><span class="ai-badge-dot"></span> <span id="health-text">checking model…</span></div>
       </div>
     </header>
 
@@ -211,13 +227,27 @@ print("Download:", result["redacted_url"])</code></pre>
       </div>
     </main>
 
-    <footer>
-      <small>
+    <footer class="footer">
+      <div class="footer-links">
+        <a href="https://www.tanuh.ai" target="_blank" class="blue-link" title="Website">
+          <i class="fas fa-globe"></i>
+        </a>
+        <a href="https://www.linkedin.com/company/tanuh-aicoe/" target="_blank" class="blue-link" title="LinkedIn">
+          <i class="fab fa-linkedin"></i>
+        </a>
+        <a href="https://x.com/TANUH_AI" target="_blank" class="blue-link" title="Twitter">
+          <i class="fab fa-twitter"></i>
+        </a>
+        <a href="https://www.youtube.com/@TANUH-AI" target="_blank" class="blue-link" title="YouTube">
+          <i class="fab fa-youtube"></i>
+        </a>
+      </div>
+      <p class="footer-disclaimer">
         <strong>Test version — not for production use.</strong>
         Output is provided as-is; users are responsible for confirming
-        redactions before sharing. Files are stored on the server filesystem
-        under <code>./data</code>. © Tanuh.
-      </small>
+        redactions before sharing.
+      </p>
+      <p class="copyright">&copy; 2026 Tanuh AI. All rights reserved.</p>
     </footer>
 
     <script src="/static/app.js"></script>
