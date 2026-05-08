@@ -6,8 +6,9 @@ GET  /                          → frontend (single-page HTML)
 GET  /api/health                → liveness + model status
 GET  /api/supported-types       → list of accepted file extensions
 GET  /api/stats                 → live usage counters (visits, docs redacted)
-POST /api/redact                → multipart upload; returns RedactionResult
-GET  /api/files/{kind}/{key}    → download originals or redacted outputs
+POST /api/demo-token            → self-service JWT (name + email → signed token)
+POST /api/redact                → multipart upload; returns RedactionResult  [auth required]
+GET  /api/files/{kind}/{key}    → download originals or redacted outputs      [auth required]
                                   (kind ∈ {uploads, redacted})
 """
 from __future__ import annotations
@@ -16,17 +17,21 @@ import gc
 import logging
 import os
 import tempfile
+import time
 import uuid
 from collections import Counter
 from contextlib import asynccontextmanager
 from pathlib import Path
-from typing import List
+from typing import Any, Dict, List
 
 from dotenv import load_dotenv
-from fastapi import FastAPI, File, HTTPException, Request, UploadFile
+from fastapi import Depends, FastAPI, File, HTTPException, Request, UploadFile
 from fastapi.responses import FileResponse, RedirectResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
+from jose import jwt
+from pydantic import BaseModel, EmailStr
 
+from app.auth import require_bearer
 from app.model import PrivacyFilter
 from app.redactor import get_handler, supported_extensions
 from app.schemas import Entity, HealthResponse, RedactionResult
@@ -99,8 +104,55 @@ async def supported_types():
     return {"extensions": supported_extensions()}
 
 
+# ---------------------------------------------------------------------------
+# Demo token — self-service JWT issuance
+# ---------------------------------------------------------------------------
+
+class DemoTokenRequest(BaseModel):
+    name: str
+    email: EmailStr
+
+
+@app.post("/api/demo-token")
+async def create_demo_token(body: DemoTokenRequest):
+    """Issue a signed demo JWT for the given name + email.
+
+    The token is valid for DEMO_TOKEN_EXPIRY_DAYS days (default: 7).
+    Pass it as ``Authorization: Bearer <token>`` on protected endpoints.
+    """
+    secret = os.getenv("SECRET_KEY", "")
+    if not secret:
+        raise HTTPException(
+            status_code=503,
+            detail="Demo tokens are not available: SECRET_KEY is not configured.",
+        )
+
+    expiry_days = int(os.getenv("DEMO_TOKEN_EXPIRY_DAYS", "7"))
+    now = int(time.time())
+    payload = {
+        "sub": body.email,
+        "name": body.name,
+        "email": body.email,
+        "type": "demo",
+        "iat": now,
+        "exp": now + expiry_days * 86_400,
+    }
+    token = jwt.encode(payload, secret, algorithm="HS256")
+    logger.info("Demo token issued for %s (%s), expires in %dd", body.name, body.email, expiry_days)
+    return {
+        "access_token": token,
+        "token_type": "bearer",
+        "expires_in_days": expiry_days,
+        "name": body.name,
+        "email": body.email,
+    }
+
+
 @app.post("/api/redact", response_model=RedactionResult)
-async def redact_file(file: UploadFile = File(...)):
+async def redact_file(
+    file: UploadFile = File(...),
+    _claims: Dict[str, Any] = Depends(require_bearer),
+):
     if not file.filename:
         raise HTTPException(status_code=400, detail="Missing filename")
 
@@ -214,7 +266,11 @@ async def redact_file(file: UploadFile = File(...)):
 
 
 @app.get("/api/files/{kind}/{key}")
-async def download_file(kind: str, key: str):
+async def download_file(
+    kind: str,
+    key: str,
+    _claims: Dict[str, Any] = Depends(require_bearer),
+):
     if kind not in {"uploads", "redacted"}:
         raise HTTPException(status_code=404, detail="Unknown kind")
     storage = get_storage()

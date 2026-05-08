@@ -1,6 +1,47 @@
 // Privacy Filter frontend — vanilla JS, no build step.
 const $ = (sel) => document.querySelector(sel);
 
+// ---------------------------------------------------------------------------
+// Auth helpers — demo JWT stored in sessionStorage
+// ---------------------------------------------------------------------------
+const TOKEN_KEY = "pf_demo_token";
+
+function getStoredToken() {
+  return sessionStorage.getItem(TOKEN_KEY) || "";
+}
+
+function storeToken(token) {
+  sessionStorage.setItem(TOKEN_KEY, token);
+}
+
+/**
+ * Drop-in fetch() replacement that injects Authorization: Bearer <token>
+ * when a demo token is present. Falls back to a plain fetch if no token.
+ */
+async function authFetch(url, opts = {}) {
+  const token = getStoredToken();
+  if (token) {
+    opts.headers = { ...(opts.headers || {}), Authorization: `Bearer ${token}` };
+  }
+  return fetch(url, opts);
+}
+
+/**
+ * Decode the JWT payload without verifying the signature (client-side display only).
+ * Returns null if the token is malformed.
+ */
+function decodeJwtPayload(token) {
+  try {
+    const parts = token.split(".");
+    if (parts.length !== 3) return null;
+    const b64 = parts[1].replace(/-/g, "+").replace(/_/g, "/");
+    return JSON.parse(atob(b64));
+  } catch {
+    return null;
+  }
+}
+
+
 const dz = $("#dropzone");
 const fileInput = $("#file-input");
 const statusEl = $("#status");
@@ -76,7 +117,7 @@ function escapeHtml(s) {
 async function postRedact(file) {
   const fd = new FormData();
   fd.append("file", file);
-  return fetch("/api/redact", { method: "POST", body: fd });
+  return authFetch("/api/redact", { method: "POST", body: fd });
 }
 
 async function uploadFile(file) {
@@ -151,6 +192,12 @@ const tabButtons = document.querySelectorAll(".header-nav .tablinks[data-tab]");
 if (apiBaseUrlEl) {
   apiBaseUrlEl.textContent = window.location.origin;
 }
+// Also fill the curl example spans.
+const curlSpan1 = document.getElementById("api-base-url-curl");
+const curlSpan2 = document.getElementById("api-base-url-curl2");
+if (curlSpan1) curlSpan1.textContent = window.location.origin;
+if (curlSpan2) curlSpan2.textContent = window.location.origin;
+
 
 function activateTab(name) {
   tabButtons.forEach((b) => {
@@ -219,3 +266,112 @@ async function loadStats() {
 // Load stats on page init and refresh every 30 seconds.
 loadStats();
 setInterval(loadStats, 30_000);
+
+// ---------------------------------------------------------------------------
+// Demo token form
+// ---------------------------------------------------------------------------
+(function initDemoTokenForm() {
+  const form   = document.getElementById("demo-token-form");
+  const submit = document.getElementById("demo-token-submit");
+  const result = document.getElementById("demo-token-result");
+  const errEl  = document.getElementById("demo-token-error");
+  const output = document.getElementById("demo-token-output");
+  const copyBtn = document.getElementById("demo-token-copy");
+  const greeting = document.getElementById("demo-token-greeting");
+  const expiryEl = document.getElementById("demo-token-expiry");
+  const appliedEl = document.getElementById("demo-token-applied");
+
+  if (!form) return;
+
+  // If we already have a stored token from a previous session, pre-fill the
+  // result box so the user can see/copy it without re-requesting.
+  const existingToken = getStoredToken();
+  if (existingToken) {
+    _showTokenResult(existingToken, null, null, true);
+  }
+
+  form.addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const name  = document.getElementById("demo-token-name")?.value.trim();
+    const email = document.getElementById("demo-token-email")?.value.trim();
+
+    if (!name || !email) {
+      _showError("Please fill in both your name and email address.");
+      return;
+    }
+
+    submit.disabled = true;
+    submit.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Requesting…';
+    errEl.classList.add("hidden");
+    result.classList.add("hidden");
+
+    try {
+      const r = await fetch("/api/demo-token", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name, email }),
+      });
+
+      if (!r.ok) {
+        const errJson = await r.json().catch(() => ({}));
+        throw new Error(errJson.detail || `HTTP ${r.status}`);
+      }
+
+      const data = await r.json();
+      storeToken(data.access_token);
+      _showTokenResult(data.access_token, data.name, data.expires_in_days, false);
+    } catch (err) {
+      _showError(`Failed to request token: ${err.message}`);
+    } finally {
+      submit.disabled = false;
+      submit.innerHTML = '<i class="fas fa-bolt"></i> Request Token';
+    }
+  });
+
+  copyBtn?.addEventListener("click", async () => {
+    const token = output?.textContent?.trim();
+    if (!token) return;
+    try {
+      await navigator.clipboard.writeText(token);
+      copyBtn.innerHTML = '<i class="fas fa-check"></i> Copied!';
+      copyBtn.classList.add("copied");
+      setTimeout(() => {
+        copyBtn.innerHTML = '<i class="fas fa-copy"></i> Copy';
+        copyBtn.classList.remove("copied");
+      }, 2000);
+    } catch {
+      // Clipboard API not available (non-HTTPS or blocked)
+      copyBtn.textContent = "Use Ctrl+C";
+    }
+  });
+
+  function _showTokenResult(token, name, expiresInDays, restored) {
+    output.textContent = token;
+    result.classList.remove("hidden");
+    errEl.classList.add("hidden");
+
+    // Decode payload for display
+    const payload = decodeJwtPayload(token);
+    const displayName = name || payload?.name || "";
+    const expTs = payload?.exp;
+    if (displayName) {
+      greeting.textContent = restored
+        ? `Welcome back, ${displayName}!`
+        : `🎉 Token issued for ${displayName}`;
+    }
+    if (expTs) {
+      const expDate = new Date(expTs * 1000);
+      expiryEl.textContent = `Expires ${expDate.toLocaleDateString(undefined, { dateStyle: "medium" })}`;
+    } else if (expiresInDays) {
+      expiryEl.textContent = `Valid for ${expiresInDays} days`;
+    }
+
+    // Show the "applied" confirmation strip
+    if (appliedEl) appliedEl.style.display = "flex";
+  }
+
+  function _showError(msg) {
+    errEl.textContent = msg;
+    errEl.classList.remove("hidden");
+  }
+})();

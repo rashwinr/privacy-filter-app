@@ -1,5 +1,18 @@
 # Cloud Build: build + push + deploy privacy-filter to Cloud Run
 # Uses Artifact Registry + GCS backend (tanuh-bcd-bucket/privacy-app) + Secret Manager.
+#
+# Secrets managed in Secret Manager:
+#   privacy-filter-gcs-sa      → GCS service-account JSON key (pre-existing)
+#   privacy-filter-secret-key  → JWT signing key for demo bearer tokens (NEW)
+#
+# To create the JWT secret before first deploy, run:
+#   echo -n "$(openssl rand -hex 32)" | \
+#     gcloud secrets create privacy-filter-secret-key \
+#       --data-file=- --project=tanuh-bcd-questionnaire
+#
+# To rotate the key (invalidates all existing demo tokens):
+#   echo -n "$(openssl rand -hex 32)" | \
+#     gcloud secrets versions add privacy-filter-secret-key --data-file=-
 
 substitutions:
   _REGION: "asia-south1"
@@ -8,7 +21,10 @@ substitutions:
   _BUCKET: "tanuh-bcd-bucket"
   _GCS_PREFIX: "privacy-app"
   _GCS_SECRET: "privacy-filter-gcs-sa"
+  _JWT_SECRET: "privacy-filter-secret-key"   # Secret Manager secret name for JWT signing key
   _DICOM_ROWS: "100"
+  _DEMO_TOKEN_EXPIRY_DAYS: "7"
+  _KEYCLOAK_AUTH_ENABLED: "true"
   _TAG: "latest"
 
 options:
@@ -19,9 +35,30 @@ images:
   - "${_REGION}-docker.pkg.dev/$PROJECT_ID/${_AR_REPO}/${_SERVICE}:${_TAG}"
 
 steps:
-  # ── Step 1: Build Docker image ──────────────────────────────────────────────
+  # Step 1: Ensure the JWT Secret Manager secret exists.
+  # Creates it with a random 64-hex-char value on first run; idempotent thereafter.
+  - id: "ensure-jwt-secret"
+    name: "gcr.io/google.com/cloudsdktool/cloud-sdk"
+    entrypoint: "bash"
+    args:
+      - "-c"
+      - |
+        if ! gcloud secrets describe ${_JWT_SECRET} --project=$PROJECT_ID &>/dev/null; then
+          echo "Creating new secret: ${_JWT_SECRET}"
+          cat /dev/urandom | tr -dc 'a-f0-9' | head -c 64 | \
+            gcloud secrets create ${_JWT_SECRET} \
+              --data-file=- \
+              --replication-policy=automatic \
+              --project=$PROJECT_ID
+          echo "Secret ${_JWT_SECRET} created."
+        else
+          echo "Secret ${_JWT_SECRET} already exists - skipping creation."
+        fi
+
+  # Step 2: Build Docker image
   - id: "build"
     name: "gcr.io/cloud-builders/docker"
+    waitFor: ["ensure-jwt-secret"]
     args:
       - "build"
       - "-t"
@@ -30,17 +67,19 @@ steps:
       - "${_REGION}-docker.pkg.dev/$PROJECT_ID/${_AR_REPO}/${_SERVICE}:latest"
       - "."
 
-  # ── Step 2: Push image to Artifact Registry ─────────────────────────────────
+  # Step 3: Push image to Artifact Registry
   - id: "push"
     name: "gcr.io/cloud-builders/docker"
+    waitFor: ["build"]
     args:
       - "push"
       - "--all-tags"
       - "${_REGION}-docker.pkg.dev/$PROJECT_ID/${_AR_REPO}/${_SERVICE}"
 
-  # ── Step 3: Deploy to Cloud Run ─────────────────────────────────────────────
+  # Step 4: Deploy to Cloud Run
   - id: "deploy"
     name: "gcr.io/google.com/cloudsdktool/cloud-sdk"
+    waitFor: ["push"]
     entrypoint: "bash"
     args:
       - "-c"
@@ -57,19 +96,49 @@ steps:
           --min-instances 0 \
           --max-instances 5 \
           --cpu-boost \
-          --set-env-vars "MODEL_NAME=openai/privacy-filter,MODEL_DEVICE=cpu,STORAGE_BACKEND=gcs,GCS_BUCKET=${_BUCKET},GCS_PREFIX=${_GCS_PREFIX},DICOM_PIXEL_REDACT_ROWS=${_DICOM_ROWS},LOG_LEVEL=INFO" \
-          --set-secrets "GCS_CREDENTIALS_JSON=${_GCS_SECRET}:latest"
+          --set-env-vars "MODEL_NAME=openai/privacy-filter,MODEL_DEVICE=cpu,STORAGE_BACKEND=gcs,GCS_BUCKET=${_BUCKET},GCS_PREFIX=${_GCS_PREFIX},DICOM_PIXEL_REDACT_ROWS=${_DICOM_ROWS},KEYCLOAK_AUTH_ENABLED=${_KEYCLOAK_AUTH_ENABLED},DEMO_TOKEN_EXPIRY_DAYS=${_DEMO_TOKEN_EXPIRY_DAYS},LOG_LEVEL=INFO" \
+          --set-secrets "GCS_CREDENTIALS_JSON=${_GCS_SECRET}:latest,SECRET_KEY=${_JWT_SECRET}:latest"
 
-# ── HOW TO USE ─────────────────────────────────────────────────────────────────
+# HOW TO USE
 #
-# Submit the build:
+# 1. One-time: create the JWT secret (Cloud Build will also do this automatically):
 #
-#   gcloud builds submit --config cloudbuild.yaml \
-#     --project=tanuh-bcd-questionnaire
+#    echo -n "$(openssl rand -hex 32)" | \
+#      gcloud secrets create privacy-filter-secret-key \
+#        --data-file=- --project=tanuh-bcd-questionnaire
 #
-# Image will be pushed to:
+#    Grant the Cloud Run Service Account read access:
+#    gcloud secrets add-iam-policy-binding privacy-filter-secret-key \
+#      --member="serviceAccount:<CLOUD_RUN_SA>@<PROJECT>.iam.gserviceaccount.com" \
+#      --role="roles/secretmanager.secretAccessor" \
+#      --project=tanuh-bcd-questionnaire
+#
+#    Also grant the Cloud Build SA the same role so Step 1 can describe/create:
+#    gcloud secrets add-iam-policy-binding privacy-filter-secret-key \
+#      --member="serviceAccount:<CLOUD_BUILD_SA>@cloudbuild.gserviceaccount.com" \
+#      --role="roles/secretmanager.secretAccessor" \
+#      --project=tanuh-bcd-questionnaire
+#
+# 2. Submit the build:
+#
+#    gcloud builds submit --config cloudbuild.yaml \
+#      --project=tanuh-bcd-questionnaire
+#
+# 3. Override substitutions (e.g. disable auth for a staging deploy):
+#
+#    gcloud builds submit --config cloudbuild.yaml \
+#      --substitutions _KEYCLOAK_AUTH_ENABLED=false \
+#      --project=tanuh-bcd-questionnaire
+#
+# 4. Rotate the JWT key (invalidates all existing demo tokens, redeploy required):
+#
+#    echo -n "$(openssl rand -hex 32)" | \
+#      gcloud secrets versions add privacy-filter-secret-key --data-file=-
+#    gcloud builds submit --config cloudbuild.yaml --project=tanuh-bcd-questionnaire
+#
+# Image pushed to:
 #   asia-south1-docker.pkg.dev/tanuh-bcd-questionnaire/cloud-run-source-deploy/privacy-filter:latest
 #
-# Files will be written to:
+# Files written to:
 #   gs://tanuh-bcd-bucket/privacy-app/uploads/
 #   gs://tanuh-bcd-bucket/privacy-app/redacted/

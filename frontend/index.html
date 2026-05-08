@@ -64,10 +64,69 @@
 
           <h3>Authentication</h3>
           <p>
-            The test deployment is currently open (no API key). For production
-            access, request a signed identity token from Tanuh and pass it as
-            <code>Authorization: Bearer &lt;token&gt;</code>.
+            This service uses <strong>JWT bearer tokens</strong>. Request a
+            free demo token below using your name and email, then pass it as:
           </p>
+          <pre class="code-block"><code>Authorization: Bearer &lt;your-token&gt;</code></pre>
+          <p>
+            Demo tokens are valid for <strong>7 days</strong>. For production
+            deployments with Keycloak OIDC, contact the Tanuh team.
+          </p>
+
+          <!-- ── Demo Token Request Card ── -->
+          <div class="demo-token-card" id="demo-token-card">
+            <div class="demo-token-header">
+              <i class="fas fa-key"></i>
+              <span>Get a Demo Token</span>
+              <span class="demo-token-badge">FREE</span>
+            </div>
+            <form id="demo-token-form" class="demo-token-form" autocomplete="off" novalidate>
+              <div class="demo-token-fields">
+                <div class="demo-token-field">
+                  <label for="demo-token-name">Full Name</label>
+                  <input
+                    type="text"
+                    id="demo-token-name"
+                    name="name"
+                    placeholder="Your name"
+                    required
+                    autocomplete="name"
+                  />
+                </div>
+                <div class="demo-token-field">
+                  <label for="demo-token-email">Email Address</label>
+                  <input
+                    type="email"
+                    id="demo-token-email"
+                    name="email"
+                    placeholder="you@example.com"
+                    required
+                    autocomplete="email"
+                  />
+                </div>
+              </div>
+              <button type="submit" class="btn btn-primary demo-token-btn" id="demo-token-submit">
+                <i class="fas fa-bolt"></i> Request Token
+              </button>
+            </form>
+            <div id="demo-token-result" class="demo-token-result hidden">
+              <div class="demo-token-result-header">
+                <span id="demo-token-greeting"></span>
+                <span id="demo-token-expiry" class="demo-token-expiry"></span>
+              </div>
+              <div class="demo-token-output-wrap">
+                <pre class="demo-token-output" id="demo-token-output"></pre>
+                <button class="btn demo-token-copy" id="demo-token-copy" title="Copy token">
+                  <i class="fas fa-copy"></i> Copy
+                </button>
+              </div>
+              <p class="demo-token-applied" id="demo-token-applied">
+                <i class="fas fa-check-circle"></i>
+                Token applied — the Privacy Filter tab is ready to use.
+              </p>
+            </div>
+            <div id="demo-token-error" class="demo-token-error hidden"></div>
+          </div>
 
           <h3>Endpoints</h3>
           <ul class="endpoint-list">
@@ -95,15 +154,31 @@
           </ul>
 
           <h3>Quick start (curl)</h3>
-<pre class="code-block"><code>curl -X POST https://privacy-filter.tanuh.org/api/redact \
+<pre class="code-block"><code>TOKEN=$(curl -s -X POST <span id="api-base-url-curl"></span>/api/demo-token \
+  -H "Content-Type: application/json" \
+  -d '{"name":"Your Name","email":"you@example.com"}' \
+  | python3 -c "import sys,json; print(json.load(sys.stdin)['access_token'])")
+
+curl -X POST <span id="api-base-url-curl2"></span>/api/redact \
+  -H "Authorization: Bearer $TOKEN" \
   -F "file=@/path/to/document.pdf"</code></pre>
 
           <h3>Quick start (Python)</h3>
 <pre class="code-block"><code>import requests
 
+# 1. Get a demo token
+resp = requests.post(
+    "https://privacy-filter.tanuh.org/api/demo-token",
+    json={"name": "Your Name", "email": "you@example.com"},
+)
+token = resp.json()["access_token"]
+headers = {"Authorization": f"Bearer {token}"}
+
+# 2. Redact a document
 with open("document.pdf", "rb") as f:
     r = requests.post(
         "https://privacy-filter.tanuh.org/api/redact",
+        headers=headers,
         files={"file": ("document.pdf", f, "application/pdf")},
         timeout=600,
     )
