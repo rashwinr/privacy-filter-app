@@ -79,6 +79,7 @@ def _ensure_initialized() -> None:
     if _initialized:
         return
     if not _gcs_enabled():
+        sync_with_storage()
         _initialized = True
         return
     try:
@@ -86,7 +87,10 @@ def _ensure_initialized() -> None:
         prefix = _gcs_prefix()
         saved = _read_json_blob(bucket, f"{prefix}/counters.json", {})
         _counters["page_visits"] = int(saved.get("page_visits", 0))
-        _counters["docs_redacted"] = int(saved.get("docs_redacted", 0))
+        
+        # Sync docs_redacted with actual bucket content
+        sync_with_storage()
+        
         hashes = _read_json_blob(bucket, f"{prefix}/visitor_hashes.json", [])
         _visitor_hashes = set(hashes)
         _counters["unique_visitors"] = len(_visitor_hashes)
@@ -148,3 +152,16 @@ def get_stats() -> dict[str, int]:
     with _lock:
         _ensure_initialized()
         return dict(_counters)
+
+
+def sync_with_storage() -> None:
+    """Re-scan the 'redacted' storage folder to update the count."""
+    try:
+        from app.storage import get_storage
+        storage = get_storage()
+        files = storage.list_all("redacted")
+        with _lock:
+            _counters["docs_redacted"] = len(files)
+        logger.info("stats: synced docs_redacted with storage: %d files found", len(files))
+    except Exception as e:
+        logger.warning("stats: failed to sync with storage: %s", e)

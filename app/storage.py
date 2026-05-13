@@ -52,6 +52,10 @@ class Storage(ABC):
     def url(self, kind: str, key: str) -> str:
         """Return a URL the frontend can hit."""
 
+    @abstractmethod
+    def list_all(self, kind: str) -> list[str]:
+        """List all keys for a given kind."""
+
 
 class LocalStorage(Storage):
     def __init__(self, root: str = "./data") -> None:
@@ -79,6 +83,12 @@ class LocalStorage(Storage):
     def url(self, kind: str, key: str) -> str:
         # Served via FastAPI route /api/files/{kind}/{key}
         return f"/api/files/{kind}/{key}"
+
+    def list_all(self, kind: str) -> list[str]:
+        p = self.root / kind
+        if not p.exists():
+            return []
+        return [f.name for f in p.iterdir() if f.is_file()]
 
 
 class GCSStorage(Storage):  # pragma: no cover - exercised in cloud
@@ -180,6 +190,24 @@ class GCSStorage(Storage):  # pragma: no cover - exercised in cloud
         GCS and is served over HTTPS.
         """
         return f"/api/files/{kind}/{key}"
+
+    def list_all(self, kind: str) -> list[str]:
+        """List all blobs for the given kind and return their short keys."""
+        prefix = f"{self.prefix}{kind}/"
+        try:
+            blobs = self.gcs_client.list_blobs(self.bucket, prefix=prefix)
+            # Filter out the directory placeholder if it exists and extract short key
+            keys = []
+            for b in blobs:
+                if b.name == prefix:
+                    continue
+                # b.name is e.g. "privacy-app/redacted/jobid__name.pdf"
+                # short key is "jobid__name.pdf"
+                keys.append(b.name.split("/")[-1])
+            return keys
+        except Exception as e:
+            logger.error(f"GCS list failed for {prefix}: {e}")
+            return []
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
