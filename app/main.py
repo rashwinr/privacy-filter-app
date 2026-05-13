@@ -14,6 +14,7 @@ GET  /api/files/{kind}/{key}    → download originals or redacted outputs      
 from __future__ import annotations
 
 import gc
+import json
 import logging
 import os
 import tempfile
@@ -275,7 +276,6 @@ async def download_file(
         raise HTTPException(status_code=404, detail="Unknown kind")
     storage = get_storage()
     if os.getenv("STORAGE_BACKEND", "local").lower() == "gcs":
-        # Stream bytes directly from GCS — no signed URL required.
         try:
             data = storage.open_read(kind, key)
         except Exception as e:
@@ -292,6 +292,99 @@ async def download_file(
     if not p.exists():
         raise HTTPException(status_code=404, detail="File not found")
     return FileResponse(p, filename=key.split("__", 1)[-1])
+
+
+# ---------------------------------------------------------------------------
+# Async submit — enqueue via Celery, return task_id immediately (202)
+# ---------------------------------------------------------------------------
+
+@app.post("/api/submit", status_code=202)
+async def submit_redact(
+    file: UploadFile = File(...),
+    _claims: Dict[str, Any] = Depends(require_bearer),
+):
+    """Enqueue a redaction job and return a task_id immediately (202 Accepted).
+
+    Poll ``GET /api/task-status/{task_id}`` to check progress and retrieve the
+    full RedactionResult when the job finishes.
+    """
+    if not file.filename:
+        raise HTTPException(status_code=400, detail="Missing filename")
+
+    try:
+        from app.redactor import get_handler
+        get_handler(file.filename)           # validate extension early
+    except ValueError as e:
+        raise HTTPException(status_code=415, detail=str(e))
+
+    # Write the upload to a shared temp path the worker can read.
+    job_id = uuid.uuid4().hex[:12]
+    safe_name = Path(file.filename).name
+    upload_key = f"{job_id}__{safe_name}"
+
+    tmp_upload_dir = Path(tempfile.gettempdir()) / "pf_uploads"
+    tmp_upload_dir.mkdir(parents=True, exist_ok=True)
+    upload_path = tmp_upload_dir / upload_key
+    upload_path.write_bytes(await file.read())
+
+    from app.tasks import process_redaction_task
+    result = process_redaction_task.apply_async(
+        kwargs={
+            "upload_path": str(upload_path),
+            "upload_key": upload_key,
+            "job_id": job_id,
+            "original_filename": safe_name,
+            "content_type": file.content_type or "application/octet-stream",
+        }
+    )
+    task_id = result.id
+    logger.info("Enqueued privacy-filter task %s for file %s", task_id, safe_name)
+    return {"task_id": task_id, "job_id": job_id, "status": "queued"}
+
+
+@app.get("/api/task-status/{task_id}")
+async def task_status(task_id: str):
+    """Poll the status of an async redaction job.
+
+    Returns JSON with ``status`` ∈ {queued, running, completed, failed}.
+    When ``status == completed`` the full RedactionResult is included.
+    """
+    import redis as _redis
+    redis_url = os.getenv("REDIS_URL", "redis://localhost:6379/0")
+
+    # 1. Check our own result cache first (set by the task on completion)
+    try:
+        r = _redis.from_url(redis_url, decode_responses=True)
+        cached = r.get(f"result:{task_id}")
+        if cached:
+            data = json.loads(cached)
+            return data
+    except Exception:
+        pass
+
+    # 2. Fall back to Celery task state
+    try:
+        from app.tasks import process_redaction_task
+        async_result = process_redaction_task.AsyncResult(task_id)
+        state = async_result.state       # PENDING / PROGRESS / SUCCESS / FAILURE
+        if state == "PENDING":
+            return {"task_id": task_id, "status": "queued"}
+        if state == "PROGRESS":
+            meta = async_result.info or {}
+            return {"task_id": task_id, "status": "running",
+                    "step": meta.get("step"), "progress": meta.get("progress")}
+        if state == "SUCCESS":
+            result = async_result.result or {}
+            result["status"] = "completed"
+            return result
+        if state == "FAILURE":
+            return {"task_id": task_id, "status": "failed",
+                    "error": str(async_result.result)}
+        return {"task_id": task_id, "status": state.lower()}
+    except Exception as e:
+        logger.exception("task_status lookup failed")
+        raise HTTPException(status_code=500, detail=str(e))
+
 
 
 @app.get("/api/stats")
