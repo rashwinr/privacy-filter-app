@@ -50,13 +50,12 @@ logger = logging.getLogger("privacy_filter")
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Pre-load model so first request is fast.
+    # Load model in a background thread so the web server starts immediately.
+    # This prevents the lifespan from blocking the health check and UI.
+    import threading
     pf = PrivacyFilter.instance()
-    try:
-        pf.load()
-    except Exception:
-        # Don't crash startup — health endpoint will reflect failure.
-        logger.exception("Model failed to load at startup")
+    thread = threading.Thread(target=pf.load, daemon=True)
+    thread.start()
     yield
 
 

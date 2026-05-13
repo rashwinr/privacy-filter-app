@@ -87,9 +87,11 @@ def _ensure_initialized() -> None:
         prefix = _gcs_prefix()
         saved = _read_json_blob(bucket, f"{prefix}/counters.json", {})
         _counters["page_visits"] = int(saved.get("page_visits", 0))
+        _counters["docs_redacted"] = int(saved.get("docs_redacted", 0))
         
-        # Sync docs_redacted with actual bucket content
-        sync_with_storage()
+        # We no longer auto-sync with storage on every startup. 
+        # This allows manual overrides in counters.json to persist.
+        # To force a re-scan, sync_with_storage() can be called manually or via a trigger.
         
         hashes = _read_json_blob(bucket, f"{prefix}/visitor_hashes.json", [])
         _visitor_hashes = set(hashes)
