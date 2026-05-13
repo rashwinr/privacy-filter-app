@@ -134,6 +134,7 @@ async def create_demo_token(body: DemoTokenRequest):
         "name": body.name,
         "email": body.email,
         "type": "demo",
+        "service": "privacy-filter",
         "iat": now,
         "exp": now + expiry_days * 86_400,
     }
@@ -145,7 +146,16 @@ async def create_demo_token(body: DemoTokenRequest):
         "expires_in_days": expiry_days,
         "name": body.name,
         "email": body.email,
+        "service": "privacy-filter",
     }
+
+
+# Aliases: /api/token and /privacy-filter/api/token both map here
+# so the frontend and proxy can use a consistent path across all services.
+@app.post("/api/token", include_in_schema=False)
+@app.post("/privacy-filter/api/token", include_in_schema=False)
+async def create_demo_token_alias(body: DemoTokenRequest):
+    return await create_demo_token(body)
 
 
 @app.post("/api/redact", response_model=RedactionResult)
